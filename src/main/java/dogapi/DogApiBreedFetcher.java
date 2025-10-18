@@ -31,33 +31,55 @@ public class DogApiBreedFetcher implements BreedFetcher {
         }
 
         final String url = "https://dog.ceo/api/breed/"
-                + breed.trim().toLowerCase(Locale.ROOT)
-                + "/list";
+                + breed.trim().toLowerCase(Locale.ROOT) + "/list";
 
-        final Request request = new Request.Builder().url(url).get().build();
+        final Request request = new Request.Builder()
+                .url(url)
+                .get()
+                .header("Accept", "application/json")
+                .header("User-Agent", "DogBreedFetcher/1.0 (+https://example.com)")
+                .build();
 
         try (Response response = client.newCall(request).execute()) {
-            if (!response.isSuccessful() || response.body() == null) {
-                throw new BreedNotFoundException("Failed to fetch sub-breeds for: " + breed);
+            if (response.body() == null) {
+                throw new BreedNotFoundException("Empty response body for: " + breed);
             }
 
-            final String body = response.body().string(); // may throw IOException (caught)
-            final JSONObject json = new JSONObject(body);
+            final String body = response.body().string();
 
-            if (!"success".equalsIgnoreCase(json.optString("status"))) {
-                throw new BreedNotFoundException(
-                        json.optString("message", "Breed not found: " + breed));
+            // If HTTP not successful, dog.ceo often returns a JSON error; try to surface it.
+            if (!response.isSuccessful()) {
+                try {
+                    JSONObject err = new JSONObject(body);
+                    String msg = err.optString("message", "HTTP " + response.code());
+                    throw new BreedNotFoundException(msg);
+                } catch (org.json.JSONException ignored) {
+                    throw new BreedNotFoundException("HTTP " + response.code() + " for: " + breed);
+                }
+            }
+
+            final JSONObject json = new JSONObject(body);
+            final String status = json.optString("status", "");
+            if (!"success".equalsIgnoreCase(status)) {
+                // dog.ceo uses { status:"error", message:"..." }
+                String msg = json.optString("message", "Breed not found: " + breed);
+                throw new BreedNotFoundException(msg);
             }
 
             final JSONArray arr = json.getJSONArray("message");
             final List<String> subBreeds = new ArrayList<>(arr.length());
-            for (int i = 0; i < arr.length(); i++) subBreeds.add(arr.getString(i));
+            for (int i = 0; i < arr.length(); i++) {
+                subBreeds.add(arr.getString(i));
+            }
             subBreeds.sort(String.CASE_INSENSITIVE_ORDER);
             return subBreeds;
 
-        } catch (IOException | org.json.JSONException e) {
-            // Your exception only takes a String (per your earlier compile error)
-            throw new BreedNotFoundException("Error fetching sub-breeds for: " + breed);
+        } catch (IOException e) {
+            // Network/SSL/timeouts
+            throw new BreedNotFoundException("Network error fetching sub-breeds for: " + breed);
+        } catch (org.json.JSONException e) {
+            // Non-JSON body (e.g., 403 HTML) or unexpected schema
+            throw new BreedNotFoundException("Unexpected response parsing for: " + breed);
         }
     }
 }
