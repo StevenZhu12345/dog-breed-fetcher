@@ -42,7 +42,7 @@ public class DogApiBreedFetcher implements BreedFetcher {
         final Request request = new Request.Builder().url(url).get().build();
 
         try (Response response = client.newCall(request).execute()) {
-            if (response == null || !response.isSuccessful() || response.body() == null) {
+            if (!response.isSuccessful() || response.body() == null) {
                 throw new BreedNotFoundException("Failed to fetch sub-breeds for: " + breed);
             }
 
